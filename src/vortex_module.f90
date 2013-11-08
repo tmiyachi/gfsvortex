@@ -46,6 +46,8 @@ module vortex_module
   ! 2.5 degree (~250km) (KBR95)
   real(kind=sp),     parameter, private :: dscale2 = (2.5)**2  !(dscale)**2
 
+  !for debug
+  logical, private :: debug = .false.
 contains
 
   subroutine separate_env_vortex(imax,jmax,kmax,xr,yr,datar,lur,lvr,cx,cy,env,vrtex,cx_new,cy_new)
@@ -319,7 +321,7 @@ contains
     i = minval(maxloc(twd_ave))
     twd_ave_max = twd_ave(i)
     r_max = r(i)
-    ir_strt = searchidx(r,1.5*r_max,-1)
+    ir_strt = min(searchidx(r,1.5*r_max,-1),rrmax)
 
     !! 1.2) calculate Rf_ave (algorithm is based on KBR95 section 2.c (see fig.3))
     rf_ave = r_max  ! neither condition is met 
@@ -371,6 +373,7 @@ contains
           ! V < 3m/s
           if ( twd(i,j) < 3. ) then ! second condition is met
              rf(j) = r(i)
+             irf(j) = i
              exit
           end if
           ! V < 6 m/s and -dV/dr < 4x10^-6 /s   !1degree ~ 100 km = 1e5 m
@@ -378,16 +381,17 @@ contains
              n = n + 1
              if ( n == 2 ) then   ! first condition is met
                 rf(j) = r(i)
+                irf(j) = i
                 exit
              end if
           end if
        end do
     end do
-    
+
     !! 2.2) calculate R0
     do j = 1, prmax
        m = irf(j)
-       n = min(searchidx(r,1.25*rf(m),1),prmax)     
+       n = min(searchidx(r,1.25*rf(j),1),rrmax)     
        if ( minval(twd(m:n,j)) < 0 ) then  !anticyconic wind exist within [Rf,1.25*Rf] case
           do i = m, n
              if (twd(i,j)<0) exit          
@@ -397,7 +401,7 @@ contains
           r0(j) = min(1.25*rf(j),r(rrmax)) !R0 set to 1.25*Rf
        end if
     end do
-    
+
     write(*,*) " determination of filter radius (degree)"
     write(*,'("  Ra, Rmax_ave, Rb, Rf_ave= ",f5.1,f5.1,f5.1,f5.1)'),ra,r_max,rb,rf_ave
     write(*,'("  NE direction Rf, R0= ",f5.1,f5.1)'),rf(4), r0(4) 
@@ -410,14 +414,15 @@ contains
     write(*,'("  maximum      Phi,R0= ",f5.1,f5.1)'),phi(n)*180./PI,r0(n)
 
     ! for debug
-    !    open(21,file='check_domain.txt')
-    !    write(21,*) cx,cy
-    !    do i = 1, prmax
-    !       write(21,*) cx+r0(i)*cos(phi(i)),cy+r0(i)*sin(phi(i))
-    !    end do
-    !    write(21,*) cx+r0(1)*cos(phi(1)),cy+r0(1)*sin(phi(1))
-    !    close(21)
-    
+    if (debug) then
+       open(21,file='check_domain.txt')
+       write(21,*) cx,cy
+       do i = 1, prmax
+          write(21,*) cx+r0(i)*cos(phi(i)),cy+r0(i)*sin(phi(i))
+       end do
+       write(21,*) cx+r0(1)*cos(phi(1)),cy+r0(1)*sin(phi(1))
+       close(21)
+    end if
   end subroutine filter_domain
 
   subroutine remove_vortex(imax,jmax,kmax,xi,yi,dstrb,cx,cy,r0,vrtex)
