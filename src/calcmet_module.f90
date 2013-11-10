@@ -10,7 +10,7 @@ module calcmet_module
   implicit none
 
   private
-  public :: calcmet_q, calcmet_rh, calcmet_ps, calcmet_z, calcmet_rh_fromTd
+  public :: calcmet_q, calcmet_rh, calcmet_ps, calcmet_z, calcmet_rh_fromTd, calcmet_msl
 
   interface calcmet_q
      module procedure calcmet_q_0d, calcmet_q_1d0d, calcmet_q_2d0d, &
@@ -344,7 +344,7 @@ contains
   ! FUNCTION calcmet_msl() result (msl)
   !
   ! DESCRIPTION
-  !  compute mean sea level pressure using the ECMWF formulation
+  !  compute mean sea level pressure using hydrostatic equation
   !
   ! ARGUMENTS
   !  INPUT:
@@ -359,33 +359,14 @@ contains
   function calcmet_msl_1d1d(T,zs,ps,plev) result (msl)
     real(kind=sp), intent(in) :: T(:),plev(:)
     real(kind=sp), intent(in) :: zs,ps
-    real(kind=sp), parameter  :: Tc1=290.5,Tc2=255.,dTdz=isa_gamma
+    real(kind=sp), parameter  :: dTdz=isa_gamma
     real(kind=sp)             :: msl
     integer(kind=i4b) :: kl
-    real(kind=sp)     :: Ts,T0,gamma,x 
+    real(kind=sp)     :: Ts
 
-    if (zs < 0.001*grav) then
-       msl = ps
-    else       
-       kl = searchidx(plev,ps,-1)  !plev(kl-1)
-       if (kl==0) then
-          print*, "input pressure level must be abobe surface"
-          call abort
-       end if
-       Ts = extrapolate_Ts(T(kl),plev(kl),ps)
-       T0 = Ts + gamma*zs                      !mean sea level temperature
-       if ( T0 > Tc1 .and. Ts > Tc1 ) then
-          gamma = 0.
-          Ts = 0.5*(Tc2+Ts)
-       else if ( Ts < Tc2) then
-          gamma = dTdz
-          Ts = 0.5*(Tc2+Ts)
-       else
-          gamma = dTdz
-       end if
-       x = gamma*zs/Ts
-       msl = ps*exp( zs/gascon/Ts/grav*(1-0.5*x+0.333*x**2) )
-    end if
+    kl = searchidx(plev,ps,-1)                     !plev(kl-1)>ps>plev(kl)
+    Ts = extrapolate_Ts(T(kl),plev(kl),ps)
+    msl = ps*(1.+dTdz*zs/Ts )**(grav/gascon/dTdz)
 
   end function calcmet_msl_1d1d
   function calcmet_msl_3d3d(T,zs,ps,plev) result (msl)
@@ -401,6 +382,5 @@ contains
     end do
 
   end function calcmet_msl_3d3d
-
 
 end module calcmet_module
