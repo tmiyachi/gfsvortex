@@ -91,8 +91,10 @@ contains
     call smoothing_filter(imax,jmax,1,lvr,lvrd)
 
     ! for debug
-    !    call write_grads(21,'check_plev_dstrb.bin',imax,jmax,64,1,8,xr,yr,dstrb)
-    
+    if (debug) then
+       call write_grads(21,'check_plev_dstrb.bin',imax,jmax,64,1,8,xr,yr,dstrb)
+       call write_grads(21,'check_plev_basic.bin',imax,jmax,64,1,8,xr,yr,datar-dstrb)
+    end if
     ! 2) calculate new TC center to apply cirindrical filter
     !    use low-level disturbance field
     print*, "2) CALCULATION OF THE NEW STORM CENTER"
@@ -121,7 +123,7 @@ contains
     !  INPUT:
     !    total(imax,jmax,kmax) : total scalar field
     !  OUTPUT:
-    !    dstrb(imax,jmax,kmax) : disturbance filtered field
+    !    dstrb(imax,jmax,kmax) : disturbance field
     !
     ! REFFERENCE
     !  Kurihara et al., 1992, MWR
@@ -178,7 +180,7 @@ contains
     !  nearest the first-guess position (cxi,cyi), calculate TC center 
     !  position (cxo,cyo) which maximize the azimuthally averaged
     !  tangential component of the disturbance wind for each profile
-    !   See more detail in KBR95 section 2.c
+    !  See more detail in KBR95 section 2.c
     !
     ! ARGUMENTS
     !  INPUT:
@@ -187,7 +189,7 @@ contains
     !    yi(jmax)     : input y-coordinate
     !    u(imax,jmax) : low level disturbance zonal wind (850hPa)
     !    v(imax,jmax) : low level disturbance meridional wind (850hPa)
-    ! OUTPUT:
+    !  OUTPUT:
     !    cxo,cyo      : new TC center position
     !
     ! MODULE
@@ -369,7 +371,7 @@ contains
        rs(j) = r(ir_strt)
        !! 2.1) calculate Rf
        n = 0
-       do i = ir_strt, rrmax
+       do i = max(ir_strt,2), rrmax-1
           ! V < 3m/s
           if ( twd(i,j) < 3. ) then ! second condition is met
              rf(j) = r(i)
@@ -377,7 +379,7 @@ contains
              exit
           end if
           ! V < 6 m/s and -dV/dr < 4x10^-6 /s   !1degree ~ 100 km = 1e5 m
-          if ( twd(i,j) < 6. .and. -(twd(i+1,j)-twd(i,j))/1.e5/drr < 4.e-6 ) then 
+          if ( twd(i,j) < 6. .and. -0.5*(twd(i+1,j)-twd(i-1,j))/1.e5/drr < 4.e-6 ) then 
              n = n + 1
              if ( n == 2 ) then   ! first condition is met
                 rf(j) = r(i)
@@ -557,5 +559,3 @@ contains
   
 
 end module vortex_module
-
-

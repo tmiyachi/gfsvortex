@@ -117,6 +117,7 @@ program main
   write(*,'("  maxwv= ",i0)') maxwv
   write(*,*) 
 
+
   !!
   !! 2) interpolate to the regional subdomain 
   !!
@@ -165,8 +166,6 @@ program main
   write(*,'("  lonr(1),lonr(irmax)= ",f7.2,f7.2)'),lonr(1),lonr(irmax)
   write(*,'("  latr(1),latr(jrmax)= ",f7.2,f7.2)'),latr(1),latr(jrmax)
   write(*,*)
-  ! for debug
-  !  call write_grads(21,'check_mlev_total.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrm)
   
 
   !!
@@ -181,6 +180,9 @@ program main
   !! 3.2) calculate constant pressure level for vertical interpolation
   psref = maxval(datrm(:,:,nvps))    ! referrence pressure
   call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psref,pm=prp)
+  
+  ! for debug  
+  call write_grads(21,'check_mlev_total.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrm)
 
   !! 3.3) vertically interpolate data from model levels to constant pressure levels
   datrp(:,:,nvps) = datrm(:,:,nvps)
@@ -198,10 +200,8 @@ program main
         call p2p(ijrmax,kmax,datrm(:,:,nv:nv+dk),prm,datrm(:,:,nvps),kmax,prp,datrp(:,:,nv:nv+dk))
      end if
   end do
-
   ! convert Ps->Msl
-!  datrp(:,:,nvps) = calcmet_msl(datrp(:,:,nvt:nvt+kmax-1),hsr,datrp(:,:,nvps),prp)
-
+  !datrp(:,:,nvps) = calcmet_msl(datrm(:,:,nvt:nvt+dk),hsr,datrp(:,:,nvps),prm)
   write(*,'("  refference pressure is ",f9.2)') psref(1,1) 
   write(*,'("  prm(1,1,1)= ",f9.2,"  prp(1,1,1)= ",f9.2)') prm(1,1,1),prp(1,1,1)
   write(*,*)
@@ -238,9 +238,9 @@ program main
   dlat = clat_new - clat
   call interp2d(irmax,jrmax,nvmax,lonr,latr,vrtex,irmax,jrmax,lonr-dlon,latr-dlat,datrp,undef_value=0.)
   datrp = env + datrp 
-  write(*,'("  vortex TC center clon,clat=           ",f5.1,f5.1)') clon,clat
-  write(*,'("  relocated TC center clon_new,clat_new=",f5.1,f5.1)') clon_new,clat_new
-  write(*,'("  difference of TC center dlon,dlat=    ",f5.2,f5.2)') dlon,dlat
+  write(*,'("  vortex TC center clon,clat=           ",f6.1,f6.1)') clon,clat
+  write(*,'("  relocated TC center clon_new,clat_new=",f6.1,f6.1)') clon_new,clat_new
+  write(*,'("  difference of TC center dlon,dlat=    ",f6.2,f6.2)') dlon,dlat
   write(*,*)
   ! for debug
   !  call write_grads(21,'check_plev_relocated.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrp)
@@ -267,9 +267,9 @@ program main
      end if
   end do
   ! convert MSL->Ps
-  ! datrm(:,:,nvps) = 
+  !datrm(:,:,nvps) = calcmet_ps(datrm(:,:,nvt:nvt+dk),hsr,datrm(:,:,nvps),prm)
   ! for debug
-  !  call write_grads(21,'check_mlev_relocated.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrm)
+  !call write_grads(21,'check_mlev_relocated.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrm)
 
 
   !!
@@ -283,12 +283,12 @@ program main
   jy2 = searchidx(lat,latr(jrmax),1)    ! R(1,1)            -            R(irmax,1)
   irgmax = ix2-ix1+1
   jrgmax = jy2-jy1+1
-  nv = 1
+
   write(*,'("  lon(ix1),lon(ix2),lat(jy1),lag(jy2)= ",f7.2,f7.2,f6.2,f6.2)'),lon(ix1),lon(ix2),lat(jy1),lat(jy2)
-  write(*,*)
-  
+  write(*,*) 
+  nv = 1  
   call interp2d(irmax,jrmax,1,lonr,latr,datrm(:,:,nv),            &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),psg(ix1:ix2,jy1:jy2))
+       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),psg(ix1:ix2,jy1:jy2))  
   nv = nv + 1
   call interp2d(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
        &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),tg(ix1:ix2,jy1:jy2,:))
