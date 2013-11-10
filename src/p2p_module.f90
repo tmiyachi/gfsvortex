@@ -113,13 +113,13 @@ contains
 
   end subroutine p2p
 
-  subroutine p2p_extrapolate_T(imax,kmaxi,tempi,pi,psi,kmaxo,po,pso,hs,tempo,constant_value)
+  subroutine p2p_extrapolate_T(imax,kmaxi,tempi,pi,psi,kmaxo,po,pso,hs,tempo)
     ! DESCRIPTION 
     !   vertically interpolate input filed from pressure level to another pressue level
     !  by 4-point lagrange interpolation method for "temperature field"
     !   
     ! NOTE
-    !   1) The layers adjacent to the input top and bottom layer are calculated using
+    !     The layers adjacent to the input top and bottom layer are calculated using
     !     linear interpolation. Above the highest input level the temperature is kept constant
     !     and equal to the value of the highest input level. Between the lowest input level and 
     !     the input surface the temperature is interpolated using EXTRAPOLATE_T.
@@ -134,16 +134,7 @@ contains
     !     pi(1)        ----------------------------------------------
     !                  linearly extrapolated by EXTRAPOLATE_T
     !     ps           ----------------------------------------------
-    !
-    !   2) If input pressure level is under the surface, the field at the level is not used.
-    !
-    !                  lagrange interpolation (use 4 levels)
-    !     pi(kps+1)    -----------------------------------------
-    !                  linear (use 2 levels)
-    !     pi(kps)      -----------------------------------------
     !                  linearly extrapolated by EXTRAPOLATE_T
-    !     ps           -----------------------------------------
-    !                  constant_value
     !
     ! ARGUMENTS
     !  INPUT:
@@ -153,7 +144,6 @@ contains
     !   hs(imax)          : output surface height                  [m]
     !   po(imax,kmaxo)    : output filed pressure level            [Pa]
     !   pso(imax)         : output pressure surface field          [Pa]
-    !   constant_value    : constant value of the field under the bottom level (optional)
     !  OUTPUT:  
     !   tempo(imax,kmaxo) : interpolated temperature field
     !
@@ -164,7 +154,6 @@ contains
     real(kind=sp),     intent(in)  :: tempi(imax,kmaxi),psi(imax),pso(imax),hs(imax)
     real(kind=sp),     intent(in)  :: pi(imax,kmaxi),po(imax,kmaxo)
     real(kind=sp),     intent(out) :: tempo(imax,kmaxo)
-    real(kind=sp), intent(in), optional :: constant_value
 
     integer(kind=i4b) :: i,k,ki,kps
     real(kind=sp) :: lnpo,Ts
@@ -182,13 +171,11 @@ contains
           lnpo = -log(po(i,k))
           ki = searchidx(lnpi(i,:),lnpo,1)        !lnpi(ki)<=lnpo<lonpi(ki+1)
           if (po(i,k) > pso(i)) then              !!under surface
-             if (present(constant_value)) then
-                tempo(i,k) = constant_value
-             else
-                tempo(i,k) = Ts
-             end if
+             !extrapolate from surface             
+             tempo(i,k) = extrapolate_T(po(i,k),pso(i),hs(i),Ts) 
           else if ( ki == 0 .or.  ki < kps ) then       !!out of bottom level          
-             tempo(i,k) = extrapolate_T(po(i,k),pso(i),hs(i),Ts) !extrapolate from surface             
+             !extrapolate from surface             
+             tempo(i,k) = extrapolate_T(po(i,k),pso(i),hs(i),Ts) 
           else if ( ki == kmaxi) then                   !!out of top level
              tempo(i,k) = tempi(i,kmaxi)      !constant
           else if ( ki == kps .or. ki+1 == kmaxi ) then !!bottom or top level
