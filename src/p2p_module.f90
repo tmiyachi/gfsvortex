@@ -150,7 +150,7 @@ contains
     !   tempi(imax,kmaxi) : input temperature field to interpolate [K]
     !   pi(imax,kmaxi)    : input field pressure level             [Pa]
     !   psi(imax)         : input surface pressure field           [Pa]
-    !   hs(imax)          : surface pressure height                [m]
+    !   hs(imax)          : output surface height                  [m]
     !   po(imax,kmaxo)    : output filed pressure level            [Pa]
     !   pso(imax)         : output pressure surface field          [Pa]
     !   constant_value    : constant value of the field under the bottom level (optional)
@@ -276,8 +276,8 @@ contains
     real(kind=sp) :: Ts
     real(kind=sp), parameter :: dTdz=isa_gamma !lapse late K/m
 
-    Ts = Tl*(1 + dTdz*air_rd/g*(1./pl*ps-1.))
-!    Ts = Tl*(1 + dTdz*air_rd/g*log(ps/pl-1+1))
+!    Ts = Tl*(1 + dTdz*air_rd/g*(1./pl*ps-1.))
+    Ts = Tl*(1 + dTdz*air_rd/g*log(ps/pl))
     
   end function extrapolate_Ts
 
