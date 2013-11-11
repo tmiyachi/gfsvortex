@@ -10,7 +10,8 @@ module calcmet_module
   implicit none
 
   private
-  public :: calcmet_q, calcmet_rh, calcmet_ps, calcmet_z, calcmet_rh_fromTd, calcmet_msl
+  public :: calcmet_q, calcmet_rh, calcmet_ps, calcmet_z, calcmet_rh_fromTd, &
+       &    calcmet_slp, calcmet_ps_fromslp
 
   interface calcmet_q
      module procedure calcmet_q_0d, calcmet_q_1d0d, calcmet_q_2d0d, &
@@ -26,9 +27,12 @@ module calcmet_module
   interface calcmet_rh_fromTd
      module procedure calcmet_rh_fromTd_0d, calcmet_rh_fromTd_3d
   end interface calcmet_rh_fromTd
-  interface calcmet_msl
-     module procedure calcmet_msl_1d1d, calcmet_msl_3d3d
-  end interface calcmet_msl
+  interface calcmet_slp
+     module procedure calcmet_slp_1d1d, calcmet_slp_3d3d
+  end interface calcmet_slp
+  interface calcmet_ps_fromslp
+     module procedure calcmet_ps_fromslp_1d1d, calcmet_ps_fromslp_3d3d
+  end interface calcmet_ps_fromslp
   
 contains
   !!
@@ -341,7 +345,7 @@ contains
   end function calcmet_rh_fromTd_3d
 
   !!
-  ! FUNCTION calcmet_msl() result (msl)
+  ! FUNCTION calcmet_slp(T, zs, ps, plev) result (slp)
   !
   ! DESCRIPTION
   !  compute mean sea level pressure using hydrostatic equation
@@ -353,34 +357,80 @@ contains
   !    ps   : surface pressure        [Pa]
   !    plev : pressure level          [Pa]
   !  OUTPUT:
-  !    msl  : mean sea level pressure [Pa]
+  !    slp  : mean sea level pressure [Pa]
   !
   !!
-  function calcmet_msl_1d1d(T,zs,ps,plev) result (msl)
+  function calcmet_slp_1d1d(T,zs,ps,plev) result (slp)
     real(kind=sp), intent(in) :: T(:),plev(:)
     real(kind=sp), intent(in) :: zs,ps
     real(kind=sp), parameter  :: dTdz=isa_gamma
-    real(kind=sp)             :: msl
+    real(kind=sp)             :: slp
     integer(kind=i4b) :: kl
     real(kind=sp)     :: Ts
 
     kl = searchidx(plev,ps,-1)                     !plev(kl-1)>ps>plev(kl)
     Ts = extrapolate_Ts(T(kl),plev(kl),ps)
-    msl = ps*(1.+dTdz*zs/Ts )**(grav/gascon/dTdz)
-
-  end function calcmet_msl_1d1d
-  function calcmet_msl_3d3d(T,zs,ps,plev) result (msl)
+    slp = ps*(1.+dTdz*zs/Ts )**(grav/gascon/dTdz)
+    
+  end function calcmet_slp_1d1d
+  function calcmet_slp_3d3d(T,zs,ps,plev) result (slp)
     real(kind=sp), intent(in) :: T(:,:,:),plev(:,:,:)
     real(kind=sp), intent(in) :: zs(:,:),ps(:,:)
-    real(kind=sp) :: msl(size(zs,1) ,size(zs,2))
+    real(kind=sp) :: slp(size(zs,1) ,size(zs,2))
     integer(kind=i4b) :: i,j
 
     do j = 1, size(zs,2)
        do i = 1, size(zs,1)
-          msl(i,j) = calcmet_msl_1d1d(T(i,j,:),zs(i,j),ps(i,j),plev(i,j,:))
+          slp(i,j) = calcmet_slp_1d1d(T(i,j,:),zs(i,j),ps(i,j),plev(i,j,:))
        end do
     end do
 
-  end function calcmet_msl_3d3d
+  end function calcmet_slp_3d3d
+
+  !!
+  ! FUNCTION calcmet_ps_fromslp
+  !
+  ! DESCRIPTION
+  !  compute surface pressure using mean sea level pressure
+  !  assuming constant lapse late
+  !
+  ! ARGUMENTS
+  !  INPUT:
+  !    T    : temperature             [K]
+  !    zs   : geopmetoric height      [m]
+  !    slp  : sea level pressure      [Pa]
+  !    plev : pressure level          [Pa]
+  !  OUTPUT:
+  !    ps   : surface pressure        [Pa]
+  !
+  !!
+  function calcmet_ps_fromslp_1d1d(T,zs,slp,plev) result(ps)
+    real(kind=sp), intent(in) :: T(:),plev(:)
+    real(kind=sp), intent(in) :: zs,slp
+    real(kind=sp) :: ps
+    real(kind=sp), parameter  :: dTdz=isa_gamma
+    integer(kind=i4b) :: kl
+    real(kind=sp) :: T0
+
+    kl = max(searchidx(plev,slp,-1),1)        !plev(kl-1)>=slp>plev(kl)     
+    T0 = extrapolate_Ts(T(kl),plev(kl),slp)
+    
+    ps = slp*( 1.-dTdz*zs/T0)**(grav/gascon/dTdz)
+
+  end function calcmet_ps_fromslp_1d1d
+  function calcmet_ps_fromslp_3d3d(T,zs,slp,plev) result(ps)
+    real(kind=sp), intent(in) :: T(:,:,:),plev(:,:,:)
+    real(kind=sp), intent(in) :: zs(:,:),slp(:,:)
+    real(kind=sp) :: ps(size(zs,1),size(zs,2))
+    integer(kind=i4b) :: i,j
+
+    do j = 1, size(zs,2)
+       do i = 1, size(zs,1)
+          ps(i,j) = calcmet_ps_fromslp(T(i,j,:),zs(i,j),slp(i,j),plev(i,j,:))
+       end do
+    end do
+
+  end function calcmet_ps_fromslp_3d3d
+
 
 end module calcmet_module
