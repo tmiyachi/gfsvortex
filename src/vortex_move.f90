@@ -57,15 +57,16 @@ program main
   real(kind=sp), allocatable :: qg(:,:,:),o3g(:,:,:),cwcg(:,:,:)
 
   real(kind=sp)              :: lonr(irmax),latr(jrmax)
-  real(kind=sp), allocatable :: hsr(:,:),datrm(:,:,:),datrp(:,:,:)
-  real(kind=sp), allocatable :: prm(:,:,:),psref(:,:),prp(:,:,:)
+  real(kind=sp), allocatable :: hsr(:,:),psr(:,:),tr(:,:,:),dr(:,:,:),zr(:,:,:)
+  real(kind=sp), allocatable :: ur(:,:,:),vr(:,:,:),qr(:,:,:),o3r(:,:,:),cwcr(:,:,:)
+  real(kind=sp), allocatable :: datrp(:,:,:),prm(:,:,:),psref(:,:),prp(:,:,:)
 
   real(kind=sp), allocatable :: lu(:,:),lv(:,:),env(:,:,:),vrtex(:,:,:)
 
   integer(kind=i4b) :: klu,klv,ix1,ix2,jy1,jy2,ixc,jyc
 
   integer(kind=i4b) :: i,j,k,n,ierr,dk
-  integer(kind=i4b) :: nv,nvmax,nvps,nvt,nvu,nvv,nvq
+  integer(kind=i4b) :: nv,nvmax,nvps,nvt,nvu,nvv,nvq,nvz,nvslp
 
   namelist/tcinfo/clon_obs,clat_obs
   namelist/param/clon_new,clat_new
@@ -135,71 +136,74 @@ program main
 
   nvmax   = 1 + 5*kmax + 3*kmax
   dk = kmax - 1
-  allocate( hsr(irmax,jrmax))
-  allocate( datrm(irmax,jrmax,nvmax), datrp(irmax,jrmax,nvmax))
+  allocate( hsr(irmax,jrmax), psr(irmax,jrmax) )
+  allocate( tr(irmax,jrmax,kmax), dr(irmax,jrmax,kmax), zr(irmax,jrmax,kmax) )
+  allocate( ur(irmax,jrmax,kmax), vr(irmax,jrmax,kmax) )
+  allocate( qr(irmax,jrmax,kmax), o3r(irmax,jrmax,kmax), cwcr(irmax,jrmax,kmax) )
+
   call interp2d_quasicubic(imax,jmax,1,lon,lat,hsg,irmax,jrmax,lonr,latr,hsr)
-  nv   = 1
-  nvps = nv
-  call interp2d_quasicubic(imax,jmax,1,lon,lat,psg,irmax,jrmax,lonr,latr,datrm(:,:,nv))
-  nv  = nv + 1
-  nvt = nv
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,tg,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv = nv + kmax
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,dg,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv = nv + kmax
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,zg,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv  = nv + kmax
-  nvu = nv 
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,ug,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv  = nv + kmax
-  nvv = nv 
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,vg,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv  = nv + kmax
-  nvq = nv
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,qg,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv = nv + kmax
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,o3g,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
-  nv = nv + kmax
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,cwcg,irmax,jrmax,lonr,latr,datrm(:,:,nv:nv+dk))
+  call interp2d_quasicubic(imax,jmax,1,lon,lat,psg,irmax,jrmax,lonr,latr,psr)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,tg,irmax,jrmax,lonr,latr,tr)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,dg,irmax,jrmax,lonr,latr,dr)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,zg,irmax,jrmax,lonr,latr,zr)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,ug,irmax,jrmax,lonr,latr,ur)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,vg,irmax,jrmax,lonr,latr,vr)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,qg,irmax,jrmax,lonr,latr,qr)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,o3g,irmax,jrmax,lonr,latr,o3r)
+  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,cwcg,irmax,jrmax,lonr,latr,cwcr)
 
   write(*,'(i4" x ",i0," domain ",f4.1," degrees interval")'),irmax,jrmax,dxyr
   write(*,'("  domain center is     ",f7.2,f7.2)'),lon(ixc),lat(jyc)
   write(*,'("  lonr(1),lonr(irmax)= ",f7.2,f7.2)'),lonr(1),lonr(irmax)
   write(*,'("  latr(1),latr(jrmax)= ",f7.2,f7.2)'),latr(1),latr(jrmax)
-  write(*,*)  
-  ! for debug  
-  call write_grads(21,'check_mlev_total.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrm)
-  
+  write(*,*) 
+  !for debug
+  !call write_grads(21,'check_psr_total.bin',irmax,jrmax,kmax,1,0,lonr,latr,psr)  
+
 
   !!
   !! 3) vertical interpolate to the constant pressure level
   !!
+  allocate( datrp(irmax,jrmax,nvmax) )
+  allocate( prm(irmax,jrmax,kmax), psref(irmax,jrmax), prp(irmax,jrmax,kmax) )
   write(*,*) "[3] VERTICAL INTERPOLATION TO THE CONSTANT PRESSURE LEVEL"
 
   !! 3.1) calculate input model pressure level
-  allocate( prm(irmax,jrmax,kmax), psref(irmax,jrmax), prp(irmax,jrmax,kmax) )
-  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=datrm(:,:,nvps),pm=prm)
+  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psr,pm=prm)
+
   !! 3.2) calculate constant pressure level for vertical interpolation
-  psref = maxval(datrm(:,:,nvps))    ! referrence pressure
+  psref = maxval(psr)    ! referrence pressure
   call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psref,pm=prp)
+
   !! 3.3) vertically interpolate data from model levels to constant pressure levels
-  datrp(:,:,nvps) = datrm(:,:,nvps)
-  do nv = nvt, nvmax, kmax
-     if (nv == nvt) then
-        call p2p_extrapolate_T(ijrmax,kmax,datrm(:,:,nv:nv+dk),prm,datrm(:,:,nvps),   &
-             &                 kmax,prp,datrp(:,:,nvps),hsr,datrp(:,:,nv:nv+dk))
-     else if (nv == nvq) then
-        datrm(:,:,nv:nv+dk) = calcmet_rh(datrm(:,:,nvt:nvt+dk),datrm(:,:,nv:nv+dk),prm)   !SPH->RH        
-        call p2p(ijrmax,kmax,datrm(:,:,nv:nv+dk),prm,datrm(:,:,nvps),kmax,prp,datrp(:,:,nv:nv+dk))
-        datrp(:,:,nv:nv+dk) = min(datrp(:,:,nv:nv+dk),100.)
-        datrp(:,:,nv:nv+dk) = max(datrp(:,:,nv:nv+dk),0.)
-        datrp(:,:,nv:nv+dk) = calcmet_q(datrp(:,:,nvt:nvt+dk),datrp(:,:,nv:nv+dk),prp)    !RH->SPH
-     else        
-        call p2p(ijrmax,kmax,datrm(:,:,nv:nv+dk),prm,datrm(:,:,nvps),kmax,prp,datrp(:,:,nv:nv+dk))
-     end if
-  end do
-  ! convert Ps->Msl
-  !datrp(:,:,nvps) = calcmet_msl(datrm(:,:,nvt:nvt+dk),hsr,datrp(:,:,nvps),prm)
+  nv  = 2
+  nvt = nv
+  call p2p_extrapolate_T(ijrmax,kmax,tr,prm,psr,kmax,prp,psr,hsr,datrp(:,:,nv:nv+dk))
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,dr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,zr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  nv = nv + kmax
+  nvu = nv
+  call p2p(ijrmax,kmax,ur,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  nv = nv + kmax
+  nvv = nv
+  call p2p(ijrmax,kmax,vr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  nv = nv + kmax
+  nvq = nv
+  qr = calcmet_rh(tr,qr,prm)   !SPH->RH        
+  call p2p(ijrmax,kmax,qr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  datrp(:,:,nv:nv+dk) = max(min(datrp(:,:,nv:nv+dk),100.),0.)
+  datrp(:,:,nv:nv+dk) = calcmet_q(datrp(:,:,nvt:nvt+dk),datrp(:,:,nv:nv+dk),prp)    !RH->SPH
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,o3r,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,cwcr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))  
+
+  !! 3.4) convert surface pressure to sea level pressure
+  nvslp = 1
+  datrp(:,:,nvslp) = calcmet_slp(datrp(:,:,nvt:nvt+dk),hsr,psr,prp) 
+
   write(*,'("  refference pressure is ",f9.2)') psref(1,1) 
   write(*,'("  prm(1,1,1)= ",f9.2,"  prp(1,1,1)= ",f9.2)') prm(1,1,1),prp(1,1,1)
   write(*,*)
@@ -219,9 +223,10 @@ program main
   call separate_env_vortex(irmax,jrmax,nvmax,lonr,latr,datrp,lu,lv,clon_obs,clat_obs,env,vrtex,clon,clat)
   write(*,*)
   ! for debug
-  call write_grads(21,'check_plev_total.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrp)
-  call write_grads(21,'check_plev_env.bin',irmax,jrmax,kmax,1,8,lonr,latr,env)
-  call write_grads(21,'check_plev_vrtex.bin',irmax,jrmax,kmax,1,8,lonr,latr,vrtex)
+  !call write_grads(21,'check_plev_total.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrp)
+  !call write_grads(21,'check_plev_env.bin',irmax,jrmax,kmax,1,8,lonr,latr,env)
+  !call write_grads(21,'check_plev_vrtex.bin',irmax,jrmax,kmax,1,8,lonr,latr,vrtex)
+
 
   !!
   !! 5) vortex relocation
@@ -232,14 +237,15 @@ program main
   
   dlon = clon_new - clon
   dlat = clat_new - clat
-  call interp2d_quasicubic(irmax,jrmax,nvmax,lonr,latr,vrtex,irmax,jrmax,lonr-dlon,latr-dlat,datrp,undef_value=0.)
+  call interp2d_quasicubic(irmax,jrmax,nvmax,lonr,latr,vrtex,irmax,jrmax,& 
+       &                   lonr-dlon,latr-dlat,datrp,undef_value=0.)
   datrp = env + datrp 
   write(*,'("  vortex TC center clon,clat=           ",f6.1,f6.1)') clon,clat
   write(*,'("  relocated TC center clon_new,clat_new=",f6.1,f6.1)') clon_new,clat_new
   write(*,'("  difference of TC center dlon,dlat=    ",f6.2,f6.2)') dlon,dlat
   write(*,*)
   ! for debug
-  call write_grads(21,'check_plev_relocated.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrp)
+  !call write_grads(21,'check_plev_relocated.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrp)
 
 
   !!
@@ -247,28 +253,31 @@ program main
   !!
   write(*,*) "[6] VERTICAL INTERPOLATION TO THE MODEL LEVEL"  
   write(*,*)
-  datrm(:,:,nvps) = datrp(:,:,nvps)
-  !! 6.1) calculate model pressure level corespoding to the relocated field
-  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=datrm(:,:,nvps),pm=prm)
+  
+  !! 6.1) calculate surface pressure
+  psr = calcmet_ps_fromslp(datrp(:,:,nvt:nvt+dk),hsr,datrp(:,:,nvslp),prp)
+
+  !! 6.2) calculate model pressure level corespoding to the relocated field
+  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psr,pm=prm)
+
   !! 6.2) vertical interpolation
-  do nv = nvt, nvmax, kmax
-     if (nv == nvt) then
-        call p2p_extrapolate_T(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,datrp(:,:,nvps),    &
-             &                 kmax,prm,datrm(:,:,nvps),hsr,datrm(:,:,nv:nv+dk))
-     else if (nv == nvq) then
-        datrp(:,:,nv:nv+dk) = calcmet_rh(datrp(:,:,nvt:nvt+dk),datrp(:,:,nv:nv+dk),prp)   !SPH->RH        
-        call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,datrp(:,:,nvps),kmax,prm,datrm(:,:,nv:nv+dk))
-        datrm(:,:,nv:nv+dk) = calcmet_q(datrm(:,:,nvt:nvt+dk),datrm(:,:,nv:nv+dk),prm)    !RH->SPH
-        datrm(:,:,nv:nv+dk) = min(datrm(:,:,nv:nv+dk),100.)
-        datrm(:,:,nv:nv+dk) = max(datrm(:,:,nv:nv+dk),0.)
-     else        
-        call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,datrp(:,:,nvps),kmax,prm,datrm(:,:,nv:nv+dk))        
-     end if
-  end do
-  ! convert MSL->Ps
-  !datrm(:,:,nvps) = calcmet_ps(datrm(:,:,nvt:nvt+dk),hsr,datrm(:,:,nvps),prm)
-  ! for debug
-  !call write_grads(21,'check_mlev_relocated.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrm)
+  nv = nvt
+  call p2p_extrapolate_T(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,psr,hsr,tr)
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,dr)        
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,zr)        
+  nv = nvq
+  datrp(:,:,nv:nv+dk) = calcmet_rh(datrp(:,:,nvt:nvt+dk),datrp(:,:,nv:nv+dk),prp)   !SPH->RH        
+  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,qr)        
+  qr = max(min(qr,100.),0.)
+  qr = calcmet_q(tr,qr,prm)    !RH->SPH
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,o3r)        
+  nv = nv + kmax
+  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,cwcr)        
+  !for debug
+  !call write_grads(21,'check_psr_relocated.bin',irmax,jrmax,kmax,1,0,lonr,latr,psr)  
 
 
   !!
@@ -285,33 +294,13 @@ program main
 
   write(*,'("  lon(ix1),lon(ix2),lat(jy1),lat(jy2)= ",f7.2,f7.2,f6.2,f6.2)'),lon(ix1),lon(ix2),lat(jy1),lat(jy2)
   write(*,*) 
-  nv = 1  
-  call interp2d_quasicubic(irmax,jrmax,1,lonr,latr,datrm(:,:,nv),            &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),psg(ix1:ix2,jy1:jy2))  
-  nv = nv + 1
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),tg(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),dg(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),zg(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),ug(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),vg(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),qg(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),o3g(ix1:ix2,jy1:jy2,:))
-  nv = nv + kmax
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,datrm(:,:,nv:nv+dk),   &
-       &        irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),cwcg(ix1:ix2,jy1:jy2,:))
+  call interp2d_quasicubic(irmax,jrmax,1,lonr,latr,psr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),psg(ix1:ix2,jy1:jy2))  
+  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,tr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),tg(ix1:ix2,jy1:jy2,:))
+  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,dr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),dg(ix1:ix2,jy1:jy2,:))
+  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,zr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),zg(ix1:ix2,jy1:jy2,:))
+  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,qr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),qg(ix1:ix2,jy1:jy2,:))
+  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,o3r,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),o3g(ix1:ix2,jy1:jy2,:))
+  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,cwcr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),cwcg(ix1:ix2,jy1:jy2,:))
 
 
   !!
