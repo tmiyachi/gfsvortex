@@ -5,39 +5,38 @@ module calcmet_module
   !
   use type_module
   use constant_module, only : grav=>earth_gravity, air_cp, gascon=>air_rd, isa_gamma
-  use p2p_module, only : extrapolate_Ts
   use ip_module, only : searchidx
   implicit none
 
   private
-  public :: calcmet_q, calcmet_rh, calcmet_ps, calcmet_z, calcmet_rh_fromTd, &
-       &    calcmet_slp, calcmet_ps_fromslp
+  public :: calcmet_rh2q, calcmet_q2rh, calcmet_ps, calcmet_z, calcmet_Td2rh, &
+       &    calcmet_ps2slp, calcmet_slp2ps, extrapolate_T, extrapolate_Ts
 
-  interface calcmet_q
-     module procedure calcmet_q_0d, calcmet_q_1d0d, calcmet_q_2d0d, &
-          &           calcmet_q_3d1d, calcmet_q_3d3d
-  end interface calcmet_q
-  interface calcmet_rh
-     module procedure calcmet_rh_0d, calcmet_rh_1d0d, calcmet_rh_2d0d, &
-          &           calcmet_rh_3d1d, calcmet_rh_3d3d
-  end interface calcmet_rh
+  interface calcmet_rh2q
+     module procedure calcmet_rh2q_0d, calcmet_rh2q_1d0d, calcmet_rh2q_2d0d, &
+          &           calcmet_rh2q_2d1d, calcmet_rh2q_3d1d, calcmet_rh2q_3d3d
+  end interface calcmet_rh2q
+  interface calcmet_q2rh
+     module procedure calcmet_q2rh_0d, calcmet_q2rh_1d0d, calcmet_q2rh_2d0d, &
+          &           calcmet_q2rh_2d1d, calcmet_q2rh_3d1d, calcmet_q2rh_3d3d
+  end interface calcmet_q2rh
   interface calcmet_z
      module procedure calcmet_z_3d1d,calcmet_z_3d3d
   end interface calcmet_z
-  interface calcmet_rh_fromTd
-     module procedure calcmet_rh_fromTd_0d, calcmet_rh_fromTd_3d
-  end interface calcmet_rh_fromTd
-  interface calcmet_slp
-     module procedure calcmet_slp_1d1d, calcmet_slp_3d3d
-  end interface calcmet_slp
-  interface calcmet_ps_fromslp
-     module procedure calcmet_ps_fromslp_1d1d, calcmet_ps_fromslp_3d3d
-  end interface calcmet_ps_fromslp
+  interface calcmet_Td2rh
+     module procedure calcmet_Td2rh_0d, calcmet_Td2rh_3d
+  end interface calcmet_Td2rh
+  interface calcmet_ps2slp
+     module procedure calcmet_ps2slp_1d1d, calcmet_ps2slp_3d3d
+  end interface calcmet_ps2slp
+  interface calcmet_slp2ps
+     module procedure calcmet_slp2ps_1d1d, calcmet_slp2ps_3d3d
+  end interface calcmet_slp2ps
   
 contains
   !!
   !
-  ! FUNCTION calcmet_q(T, rh, plev) result (q)
+  ! FUNCTION calcmet_rh2q(T, rh, plev) result (q)
   !
   ! DESCRIPTION
   !  compulte specific humidity using relative humidity
@@ -54,7 +53,7 @@ contains
   !  if T is array, the same dimension array 'q' is retured  
   !
   !!
-  function calcmet_q_0d(T, rh, plev) result (q)    
+  function calcmet_rh2q_0d(T, rh, plev) result (q)    
     real(kind=sp), intent(in) :: T, rh
     real(kind=sp), intent(in) :: plev       !Pa
     real(kind=sp) :: q
@@ -66,8 +65,8 @@ contains
     e = es*rh ! x 100 (hPa->Pa) / 100. (%->no dimension)
     q = eps*e / (plev - (1.0-eps)*e)
 
-  end function calcmet_q_0d
-  function calcmet_q_1d0d(T, rh, plev) result (q)
+  end function calcmet_rh2q_0d
+  function calcmet_rh2q_1d0d(T, rh, plev) result (q)
     real(kind=sp), dimension(:), intent(in) :: T, rh
     real(kind=sp), intent(in) :: plev
     real(kind=sp), dimension(size(T,1)) :: q
@@ -75,11 +74,11 @@ contains
     integer(kind=i4b) :: i
 
     do i=1, size(T,1)
-       q(i) = calcmet_q_0d(T(i), rh(i), plev)
+       q(i) = calcmet_rh2q_0d(T(i), rh(i), plev)
     end do
 
-  end function calcmet_q_1d0d
-  function calcmet_q_2d0d(T, rh, plev) result (q)
+  end function calcmet_rh2q_1d0d
+  function calcmet_rh2q_2d0d(T, rh, plev) result (q)
     real(kind=sp), dimension(:,:), intent(in) :: T, rh
     real(kind=sp), intent(in) :: plev
     real(kind=sp), dimension(size(T,1), size(T,2)) :: q
@@ -88,12 +87,26 @@ contains
 
     do j=1, size(T,2)
       do i=1, size(T,1)
-         q(i,j) = calcmet_q_0d(T(i,j), rh(i,j), plev)
+         q(i,j) = calcmet_rh2q_0d(T(i,j), rh(i,j), plev)
       end do
     end do
 
-  end function calcmet_q_2d0d
-  function calcmet_q_3d1d(T, rh, plev) result (q)
+  end function calcmet_rh2q_2d0d
+  function calcmet_rh2q_2d1d(T, rh, plev) result (q)
+    real(kind=sp), dimension(:,:), intent(in) :: T, rh
+    real(kind=sp), intent(in) :: plev(:)
+    real(kind=sp), dimension(size(T,1), size(T,2)) :: q
+
+    integer(kind=i4b) :: i, k
+
+    do k=1, size(T,2)
+      do i=1, size(T,1)
+         q(i,k) = calcmet_rh2q_0d(T(i,k), rh(i,k), plev(k))
+      end do
+   end do
+
+ end function calcmet_rh2q_2d1d
+  function calcmet_rh2q_3d1d(T, rh, plev) result (q)
     real(kind=sp), dimension(:,:,:), intent(in) :: T, rh
     real(kind=sp), dimension(:), intent(in) :: plev
     real(kind=sp), dimension(size(T,1), size(T,2), size(T,3)) :: q
@@ -103,13 +116,13 @@ contains
     do k = 1, size(T,3)
        do j=1, size(T,2)
           do i=1, size(T,1)
-             q(i,j,k) = calcmet_q_0d(T(i,j,k), rh(i,j,k), plev(k))
+             q(i,j,k) = calcmet_rh2q_0d(T(i,j,k), rh(i,j,k), plev(k))
           end do
        end do
     end do
 
-  end function calcmet_q_3d1d
-  function calcmet_q_3d3d(T, rh, plev) result (q)
+  end function calcmet_rh2q_3d1d
+  function calcmet_rh2q_3d3d(T, rh, plev) result (q)
     real(kind=sp), dimension(:,:,:), intent(in) :: T, rh, plev
     real(kind=sp), dimension(size(T,1), size(T,2), size(T,3)) :: q
 
@@ -118,18 +131,18 @@ contains
     do k = 1, size(T,3)
        do j=1, size(T,2)
           do i=1, size(T,1)
-             q(i,j,k) = calcmet_q_0d(T(i,j,k), rh(i,j,k), plev(i,j,k))
+             q(i,j,k) = calcmet_rh2q_0d(T(i,j,k), rh(i,j,k), plev(i,j,k))
              if( q(i,j,k)<0 ) then
              end if
           end do
        end do
     end do
 
-  end function calcmet_q_3d3d
+  end function calcmet_rh2q_3d3d
 
   !!
   ! 
-  ! FUNCTION calcmet_rh(T, q, plev) result (rh)
+  ! FUNCTION calcmet_q2rh(T, q, plev) result (rh)
   !
   ! DESCRIPTION
   !  compute relative humidity using specific humidity
@@ -146,7 +159,7 @@ contains
   !  if T is array, the same dimension array 'rh' is retured  
   !
   !!
-  function calcmet_rh_0d(T, q, plev) result (rh)
+  function calcmet_q2rh_0d(T, q, plev) result (rh)
     real(kind=sp), intent(in) :: T, q
     real(kind=sp), intent(in) :: plev
     real(kind=sp) :: rh
@@ -158,8 +171,8 @@ contains
     e = q*plev / (eps + (1-eps)*q)
     rh = e/es ! x 100 (hPa->Pa) / 100. (%->no dimension)
 
-  end function calcmet_rh_0d
-  function calcmet_rh_1d0d(T, q, plev) result (rh)
+  end function calcmet_q2rh_0d
+  function calcmet_q2rh_1d0d(T, q, plev) result (rh)
     real(kind=sp), dimension(:), intent(in) :: T, q
     real(kind=sp), intent(in) :: plev
     real(kind=sp), dimension(size(T,1)) :: rh
@@ -167,11 +180,11 @@ contains
     integer(kind=i4b) :: i
 
     do i = 1, size(T,1)
-       rh(i) = calcmet_rh_0d(T(i), q(i), plev)
+       rh(i) = calcmet_q2rh_0d(T(i), q(i), plev)
     end do
 
-  end function calcmet_rh_1d0d
-  function calcmet_rh_2d0d(T, q, plev) result (rh)
+  end function calcmet_q2rh_1d0d
+  function calcmet_q2rh_2d0d(T, q, plev) result (rh)
     real(kind=sp), dimension(:,:), intent(in) :: T, q
     real(kind=sp), intent(in) :: plev
     real(kind=sp), dimension(size(T,1), size(T,2)) :: rh
@@ -180,12 +193,25 @@ contains
 
     do j = 1, size(T,2)
        do i = 1, size(T,1)
-          rh(i,j) = calcmet_rh_0d(T(i,j), q(i,j), plev)
+          rh(i,j) = calcmet_q2rh_0d(T(i,j), q(i,j), plev)
        end do
     end do
 
-  end function calcmet_rh_2d0d
-  function calcmet_rh_3d1d(T, q, plev) result (rh)
+  end function calcmet_q2rh_2d0d
+  function calcmet_q2rh_2d1d(T, q, plev) result (rh)
+    real(kind=sp), dimension(:,:), intent(in) :: T, q
+    real(kind=sp), dimension(:), intent(in) :: plev
+    real(kind=sp), dimension(size(T,1), size(T,2)) :: rh
+    integer(kind=i4b) :: i, k
+
+    do k = 1, size(T,2)
+       do i = 1, size(T,1)
+          rh(i,k) = calcmet_q2rh_0d(T(i,k), q(i,k), plev(k))
+       end do
+    end do
+
+  end function calcmet_q2rh_2d1d
+  function calcmet_q2rh_3d1d(T, q, plev) result (rh)
     real(kind=sp), dimension(:,:,:), intent(in) :: T, q
     real(kind=sp), dimension(:), intent(in) :: plev
     real(kind=sp), dimension(size(T,1), size(T,2), size(T,3)) :: rh
@@ -194,13 +220,13 @@ contains
     do k = 1, size(T,3)
        do j = 1, size(T,2)
           do i = 1, size(T,1)
-             rh(i,j,k) = calcmet_rh_0d(T(i,j,k), q(i,j,k), plev(k))
+             rh(i,j,k) = calcmet_q2rh_0d(T(i,j,k), q(i,j,k), plev(k))
           end do
        end do
     end do
 
-  end function calcmet_rh_3d1d
-  function calcmet_rh_3d3d(T, q, plev) result (rh)
+  end function calcmet_q2rh_3d1d
+  function calcmet_q2rh_3d3d(T, q, plev) result (rh)
     real(kind=sp), dimension(:,:,:), intent(in) :: T, q
     real(kind=sp), dimension(:,:,:), intent(in) :: plev
     real(kind=sp), dimension(size(T,1), size(T,2), size(T,3)) :: rh
@@ -209,12 +235,12 @@ contains
     do k = 1, size(T,3)
        do j = 1, size(T,2)
           do i = 1, size(T,1)
-             rh(i,j,k) = calcmet_rh_0d(T(i,j,k), q(i,j,k), plev(i,j,k))
+             rh(i,j,k) = calcmet_q2rh_0d(T(i,j,k), q(i,j,k), plev(i,j,k))
           end do
        end do
     end do
 
-  end function calcmet_rh_3d3d
+  end function calcmet_q2rh_3d3d
 
   !!
   ! FUNCTION calcmet_ps(p, T, z, zs) result(ps)
@@ -304,7 +330,7 @@ contains
   end function calcmet_z_3d3d
 
   !!
-  ! FUNCTION calcmet_rh_fromTd(T, Td) result(rh)
+  ! FUNCTION calcmet_Td2rh(T, Td) result(rh)
   !
   ! DESCRIPTION
   !  compute relative humidity using dew point temperature
@@ -317,7 +343,7 @@ contains
   !    rh : relative humidity [%]
   !
   !!
-  function calcmet_rh_fromTd_0d(T, Td) result (rh)
+  function calcmet_Td2rh_0d(T, Td) result (rh)
     real(kind=sp), intent(in) :: T, Td
     real(kind=sp) :: rh
 
@@ -328,8 +354,8 @@ contains
     e  = exp(19.482 - 4303.4 / (Td-29.65)) ! in hPa JMA/WMO
     rh = e/es * 100 
 
-  end function calcmet_rh_fromTd_0d
-  function calcmet_rh_fromTd_3d(T, Td) result (rh)
+  end function calcmet_Td2rh_0d
+  function calcmet_Td2rh_3d(T, Td) result (rh)
     real(kind=sp), dimension(:,:,:), intent(in) :: T, Td
     real(kind=sp), dimension(size(T,1), size(T,2), size(T,3)) :: rh
     integer(kind=i4b) :: i, j, k
@@ -337,15 +363,15 @@ contains
     do k = 1, size(T,3)
        do j = 1, size(T,2)
           do i = 1, size(T,1)
-             rh(i,j,k) = calcmet_rh_fromTd_0d(T(i,j,k), Td(i,j,k))
+             rh(i,j,k) = calcmet_Td2rh_0d(T(i,j,k), Td(i,j,k))
           end do
        end do
     end do
 
-  end function calcmet_rh_fromTd_3d
+  end function calcmet_Td2rh_3d
 
   !!
-  ! FUNCTION calcmet_slp(T, zs, ps, plev) result (slp)
+  ! FUNCTION calcmet_ps2slp(T, zs, ps, plev) result (slp)
   !
   ! DESCRIPTION
   !  compute mean sea level pressure using hydrostatic equation
@@ -360,7 +386,7 @@ contains
   !    slp  : mean sea level pressure [Pa]
   !
   !!
-  function calcmet_slp_1d1d(T,zs,ps,plev) result (slp)
+  function calcmet_ps2slp_1d1d(T,zs,ps,plev) result (slp)
     real(kind=sp), intent(in) :: T(:),plev(:)
     real(kind=sp), intent(in) :: zs,ps
     real(kind=sp), parameter  :: dTdz=isa_gamma
@@ -372,8 +398,8 @@ contains
     Ts = extrapolate_Ts(T(kl),plev(kl),ps)
     slp = ps*(1.+dTdz*zs/Ts )**(grav/gascon/dTdz)
     
-  end function calcmet_slp_1d1d
-  function calcmet_slp_3d3d(T,zs,ps,plev) result (slp)
+  end function calcmet_ps2slp_1d1d
+  function calcmet_ps2slp_3d3d(T,zs,ps,plev) result (slp)
     real(kind=sp), intent(in) :: T(:,:,:),plev(:,:,:)
     real(kind=sp), intent(in) :: zs(:,:),ps(:,:)
     real(kind=sp) :: slp(size(zs,1) ,size(zs,2))
@@ -381,14 +407,14 @@ contains
 
     do j = 1, size(zs,2)
        do i = 1, size(zs,1)
-          slp(i,j) = calcmet_slp_1d1d(T(i,j,:),zs(i,j),ps(i,j),plev(i,j,:))
+          slp(i,j) = calcmet_ps2slp_1d1d(T(i,j,:),zs(i,j),ps(i,j),plev(i,j,:))
        end do
     end do
 
-  end function calcmet_slp_3d3d
+  end function calcmet_ps2slp_3d3d
 
   !!
-  ! FUNCTION calcmet_ps_fromslp
+  ! FUNCTION calcmet_slp2ps(T, zs, slp, plev) result (ps)
   !
   ! DESCRIPTION
   !  compute surface pressure using mean sea level pressure
@@ -404,7 +430,7 @@ contains
   !    ps   : surface pressure        [Pa]
   !
   !!
-  function calcmet_ps_fromslp_1d1d(T,zs,slp,plev) result(ps)
+  function calcmet_slp2ps_1d1d(T,zs,slp,plev) result(ps)
     real(kind=sp), intent(in) :: T(:),plev(:)
     real(kind=sp), intent(in) :: zs,slp
     real(kind=sp) :: ps
@@ -417,8 +443,8 @@ contains
     
     ps = slp*( 1.-dTdz*zs/T0)**(grav/gascon/dTdz)
 
-  end function calcmet_ps_fromslp_1d1d
-  function calcmet_ps_fromslp_3d3d(T,zs,slp,plev) result(ps)
+  end function calcmet_slp2ps_1d1d
+  function calcmet_slp2ps_3d3d(T,zs,slp,plev) result(ps)
     real(kind=sp), intent(in) :: T(:,:,:),plev(:,:,:)
     real(kind=sp), intent(in) :: zs(:,:),slp(:,:)
     real(kind=sp) :: ps(size(zs,1),size(zs,2))
@@ -426,11 +452,81 @@ contains
 
     do j = 1, size(zs,2)
        do i = 1, size(zs,1)
-          ps(i,j) = calcmet_ps_fromslp(T(i,j,:),zs(i,j),slp(i,j),plev(i,j,:))
+          ps(i,j) = calcmet_slp2ps_1d1d(T(i,j,:),zs(i,j),slp(i,j),plev(i,j,:))
        end do
     end do
 
-  end function calcmet_ps_fromslp_3d3d
+  end function calcmet_slp2ps_3d3d
 
+  !!
+  ! FUNCTION extrapolate_T(pl, ps, zs, Ts) result(T) 
+  !
+  ! DESCRIPTION
+  !  calculate the temperature at pressure level by linear extrapolation
+  !
+  ! ARGUMENT
+  !  INPUT:
+  !    pl : pressure level [Pa]
+  !    ps : surface pressure           [Pa]
+  !    zs : surface height             [m]
+  !    Ts : surface temperature        [K]
+  ! OUTPUT
+  !    T  : temperature at pressure 'pl'
+  !
+  ! REFFERENCE
+  !  ECMWF, 2012: IFS Documentation - Cy38r1, Section 5.6.4 
+  !  (avaiable at http://www.ecmwf.int/research/ifsdocs/CY38r1/IFSPart2.pdf)
+  !
+  !!
+  function extrapolate_T(pl, ps, zs, Ts) result(T)
+    real(kind=sp), intent(in) :: pl, ps, zs, ts
+    
+    real(kind=sp), parameter :: zc1 = 2000., zc2 = 2500., Tc = 298., dTdz=isa_gamma
+    real(kind=sp) :: T, gamma, T0, T1, y    
+    
+    if (zs<zc1) then
+       gamma = dTdz
+    else
+       T1 = Ts + dTdz*zs
+       T0 = min(T1, Tc) ! value for zs>zc2
+       if (zs<=zc2) then
+          T0 = (T0-T1)/(zc2-zc1)*(zs-zc1) + T1
+       end if
+       gamma = max(T0-Ts,0.)/zs
+    end if
+
+    y = gamma*gascon/grav*log(pl/ps)
+    T = Ts*(1 + y + y*y/2 + y**3/6)
+    
+  end function extrapolate_T
+
+  !!
+  ! FUNCTION extrapolate_Ts(Tl, pl, ps) result(Ts)
+  !
+  ! DESCRIPTION
+  !  calculate the surface temperature by assuming constant lapse late
+  !
+  ! ARGUMENT
+  !  INPUT:
+  !    tl : tempelature at the lowest model level    [K]
+  !    pl : the lowest pressure level                [Pa]
+  !    ps : surface pressure                         [Pa]
+  ! OUTPUT
+  !    Ts : surface temperature        [K]
+  !
+  ! REFFERENCE
+  !  ECMWF, 2012: IFS Documentation - Cy38r1 Part II, Section 5.6.1(b)
+  !  (avaiable at http://www.ecmwf.int/research/ifsdocs/CY38r1/IFSPart2.pdf)
+  !  
+  !!
+  function extrapolate_Ts(Tl, pl, ps) result(Ts)
+    real(kind=sp), intent(in) :: Tl,pl,ps
+    real(kind=sp) :: Ts
+    real(kind=sp), parameter :: dTdz=isa_gamma !lapse late K/m
+
+!    Ts = Tl*(1 + dTdz*air_rd/g*(1./pl*ps-1.))
+    Ts = Tl*(1 + dTdz*gascon/grav*log(ps/pl))
+    
+  end function extrapolate_Ts
 
 end module calcmet_module

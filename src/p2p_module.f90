@@ -4,12 +4,12 @@ module p2p_module
   !  this module contains vertical interpolation module
   !
   use type_module
-  use constant_module, only : g=>earth_gravity, air_rd, air_cp, isa_gamma
   use ip_module
+  use calcmet_module
   implicit none
 
   private
-  public :: p2p, p2p_extrapolate_T, extrapolate_T, extrapolate_Ts
+  public :: p2p, p2p_extrapolate_T, p2p_q2rh
   
 contains  
 
@@ -175,7 +175,7 @@ contains
              tempo(i,k) = extrapolate_T(po(i,k),pso(i),hs(i),Ts) 
           else if ( ki == 0 .or.  ki < kps ) then       !!out of bottom level          
              !extrapolate from surface             
-             tempo(i,k) = extrapolate_T(po(i,k),pso(i),hs(i),Ts) 
+             tempo(i,k) = extrapolate_T(po(i,k),pso(i),hs(i),Ts)
           else if ( ki == kmaxi) then                   !!out of top level
              tempo(i,k) = tempi(i,kmaxi)      !constant
           else if ( ki == kps .or. ki+1 == kmaxi ) then !!bottom or top level
@@ -203,69 +203,52 @@ contains
     !$omp end parallel
 
   end subroutine p2p_extrapolate_T
-
-  function extrapolate_T(pl, ps, zs, Ts) result(T)
-    !
-    ! DESCRIPTION
-    !  calculate the temperature at pressure level by linear extrapolation
-    !
-    ! ARGUMENT
-    !  INPUT:
-    !    pl : pressure level [Pa]
-    !    ps : surface pressure           [Pa]
-    !    zs : surface height             [m]
-    !    Ts : surface temperature        [K]
-    ! OUTPUT
-    !    T  : temperature at pressure 'pl'
-    !
-    ! REFFERENCE
-    !  ECMWF, 2012: IFS Documentation - Cy38r1, Section 5.6.4 
-    !  (avaiable at http://www.ecmwf.int/research/ifsdocs/CY38r1/IFSPart2.pdf)
-    !
-    real(kind=sp), intent(in) :: pl, ps, zs, ts
-    
-    real(kind=sp), parameter :: zc1 = 2000., zc2 = 2500., Tc = 298., dTdz=isa_gamma
-    real(kind=sp) :: T, gamma, T0, T1, y    
-    
-    if (zs<zc1) then
-       gamma = dTdz
-    else
-       T1 = Ts + dTdz*zs
-       T0 = min(T1, Tc) ! value for zs>zc2
-       if (zs<=zc2) then
-          T0 = (T0-T1)/(zc2-zc1)*(zs-zc1) + T1
-       end if
-       gamma = max(T0-Ts,0.)/zs
-    end if
-    y = gamma*air_rd/g*log(pl/ps)
-    T = Ts*(1 + y + y*y/2 + y**3/6)
-    
-  end function extrapolate_T
   
-  function extrapolate_Ts(Tl, pl, ps) result(Ts)
+  subroutine p2p_q2rh(imax,kmaxi,qi,tempi,pi,psi,kmaxo,po,pso,hs,qo)
     !
     ! DESCRIPTION
-    !  calculate the surface temperature by assuming constant lapse late
+    !  vertically interpolate specific humidity field to output pressire level
+    !  Under the lowest input level and the input surface, the specific humidity
+    !  is extrapolated to be kept constant value of the relative humidity.
     !
     ! ARGUMENT
     !  INPUT:
-    !    tl : tempelature at the lowest model level    [K]
-    !    pl : the lowest pressure level                [Pa]
-    !    ps : surface pressure                         [Pa]
-    ! OUTPUT
-    !    Ts : surface temperature        [K]
+    !   qi(imax,kmaxi)    : input specfic humidity field
+    !   tempi(imax,kmaxi) : input temperature field
+    !   pi(imax,kmaxi)    : input field pressure level
+    !   psi(imax)         : input surface pressure field
+    !   po(imax,kmaxo)    : output filed pressure level  
+    !   pso(imax)         : output surface pressure field
+    !   hs(imax,kmaxo)    : geometric height
+    !  OUTPUT:  
+    !   qo(imax,kmaxo)    : interpolated specific humidity field
     !
-    ! REFFERENCE
-    !  ECMWF, 2012: IFS Documentation - Cy38r1 Part II, Section 5.6.1(b)
-    !  (avaiable at http://www.ecmwf.int/research/ifsdocs/CY38r1/IFSPart2.pdf)
-    !  
-    real(kind=sp), intent(in) :: Tl,pl,ps
-    real(kind=sp) :: Ts
-    real(kind=sp), parameter :: dTdz=isa_gamma !lapse late K/m
+    integer(kind=i4b), intent(in)  :: imax,kmaxi,kmaxo
+    real(kind=sp),     intent(in)  :: qi(imax,kmaxi),tempi(imax,kmaxi)
+    real(kind=sp),     intent(in)  :: pi(imax,kmaxi),psi(imax)
+    real(kind=sp),     intent(in)  :: po(imax,kmaxo),pso(imax),hs(imax)
+    real(kind=sp),     intent(out) :: qo(imax,kmaxo)
 
-!    Ts = Tl*(1 + dTdz*air_rd/g*(1./pl*ps-1.))
-    Ts = Tl*(1 + dTdz*air_rd/g*log(ps/pl))
-    
-  end function extrapolate_Ts
+    integer(kind=i4b) :: i, k
+    real(kind=sp)     :: rhi(imax,kmaxi), tempo(imax,kmaxi)
+
+    do k = 1, kmaxi
+       do i = 1, imax
+          rhi(i,k) = calcmet_q2rh(tempi(i,k),qi(i,k),pi(i,k))
+       end do
+    end do
+
+    call p2p(imax,kmaxi,rhi,pi,psi,kmaxo,po,qo)
+    call p2p_extrapolate_T(imax,kmaxi,tempi,pi,psi,kmaxo,po,pso,hs,tempo)
+    qo = max(min(qo,100.),0.)
+
+    do k = 1, kmaxi
+       do i = 1, imax
+          qo(i,k) = calcmet_rh2q(tempo(i,k),qo(i,k),po(i,k))
+       end do
+    end do
+
+  end subroutine p2p_q2rh
+
 
 end module p2p_module
