@@ -8,15 +8,29 @@ program main
   use ip_module
   use vortex_module
   !for debug
-  use debug_module
+  !use debug_module
   implicit none
   !!
   ! PROGRAM vortex_move
   ! 
   ! DESCRIPTION
-  !  This program read gfs sigma file spectral data and move 
-  ! the hurricane vortex component to spcifield position
-  ! and write gfs sigma file.
+  !  This program split the field on the GFS model level into the hurricane vortex component
+  !  and the environtal component, and move the vortex componet to the new location.
+  !  This program contains following steps.
+  !
+  !   1. convert surface pressure to sea level pressure to avoid the steep montain effects.
+  !   2. vertically interpolate from model level to constant pressure level
+  !      within regional subdomain.
+  !   3. horizontally interpolate the regional field from the gaussian grid to the equally
+  !      spaced lat-lon grid on the each constant pressure level.
+  !   4. split the total field into the environmental field and the vortex field on the each constant
+  !      pressure level using the scheme proposed by Kurihara et al.(1992,1995)
+  !   5. relocate the vortex field to the new TC center.
+  !   6. horizontally interpolate the the regional field from the equally spaced lat-lon grid
+  !      to the gaussian grid on the each constant pressure level.
+  !   7. convert sea level pressure to surface pressure.
+  !   8. vertically interpolate from the constant pressure level to the model level coressponding 
+  !      to the relocated surface pressure.
   !
   ! FILES
   !  INPUT FILE:
@@ -24,49 +38,64 @@ program main
   !   unit 12: input gfs sigma file
   !   unit 21: output gfs sigma file
   !
+  ! NAMELIST
+  !  tcinfo
+  !    clon_obs,clat_obs : observed TC center to use first-guess TC center position 
+  !  param
+  !    clon_new,clat_new : new relocated TC center position. observed TC center is used in default
+  !
   ! LIBRARY
   !  sigio - sigio_modpr
-  !
-  !!
-  ! PARAMETER - irmax,jrmax,dxyr
-  !  size of subdomain grid to applay vortex removal scheme
-  !  41x41 horizontal grids with grid intervals of 1 degree (Liu et al. (2000))
   !
   ! AUTHOR
   !  Tetsuro Miyachi
   !   - https://bitbucket.org/tmiyachi
   !   - https://github.com/tmiyachi
+  !
+  ! HISTORY
+  !  2013.11.07 - initial version
+  !  see the commit log of the repositories
   !   
   !!
-  integer(kind=i4b), parameter :: irmax=41,jrmax=41,ijrmax=irmax*jrmax
-  real(kind=sp),     parameter :: dxyr=1.
-
+  ! PARAMETER - irmax,jrmax,dxyr
+  !  size of subdomain grid to applay vortex removal scheme
+  !  41x41 horizontal grids with grid intervals of 1 degree (Liu et al. (2000))
+  !!
   integer(kind=i4b), parameter :: fnm=11,fni=12,fno=21
 
-  integer(kind=i4b) :: imax,jmax,kmax,irgmax,jrgmax
-  integer(kind=i4b) :: maxwv,ntrac,nvcoord,idsl,idvc,idate(4)
-  real(kind=sp),allocatable :: vcoord(:,:) 
-  type(sigio_head) :: headi,heado
-  type(sigio_data) :: datai,datao
+  integer(kind=i4b), parameter :: irmax=41,jrmax=41
+  real(kind=sp),     parameter :: dxyr=1.
 
-  real(kind=sp) :: clon_obs,clat_obs,clon_new,clat_new,clon,clat,dlon,dlat
+  integer(kind=i4b)          :: imax,jmax,kmax
+  integer(kind=i4b)          :: maxwv,ntrac,nvcoord,idsl,idvc,idate(4)
+  real(kind=sp),allocatable  :: vcoord(:,:) 
+  type(sigio_head)           :: headi,heado
+  type(sigio_data)           :: datai,datao
+
+  real(kind=sp) :: clon_obs,clat_obs,clon_new,clat_new
 
   real(kind=sp), allocatable :: lon(:),lat(:)
   real(kind=sp), allocatable :: hsg(:,:),psg(:,:),tg(:,:,:)
   real(kind=sp), allocatable :: dg(:,:,:),zg(:,:,:),ug(:,:,:),vg(:,:,:)
   real(kind=sp), allocatable :: qg(:,:,:),o3g(:,:,:),cwcg(:,:,:)
 
-  real(kind=sp)              :: lonr(irmax),latr(jrmax)
-  real(kind=sp), allocatable :: hsr(:,:),psr(:,:),tr(:,:,:),dr(:,:,:),zr(:,:,:)
-  real(kind=sp), allocatable :: ur(:,:,:),vr(:,:,:),qr(:,:,:),o3r(:,:,:),cwcr(:,:,:)
-  real(kind=sp), allocatable :: datrp(:,:,:),prm(:,:,:),psref(:,:),prp(:,:,:)
+  real(kind=sp)              :: psref(1)
+  real(kind=sp), allocatable :: plev(:)
 
+  integer(kind=i4b)          :: irgmax,jrgmax,ijrgmax
+  real(kind=sp), allocatable :: datrgp(:,:,:), prgm(:,:,:), prgp(:,:,:)
+
+  real(kind=sp)              :: lonr(irmax),latr(jrmax)
+  real(kind=sp), allocatable :: datrp(:,:,:)
   real(kind=sp), allocatable :: lu(:,:),lv(:,:),env(:,:,:),vrtex(:,:,:)
+  
+  real(kind=sp) :: clon,clat,dlon,dlat
+  
 
   integer(kind=i4b) :: klu,klv,ix1,ix2,jy1,jy2,ixc,jyc
 
   integer(kind=i4b) :: i,j,k,n,ierr,dk
-  integer(kind=i4b) :: nv,nvmax,nvps,nvt,nvu,nvv,nvq,nvz,nvslp
+  integer(kind=i4b) :: nv,nvmax,nvt,nvu,nvv,nvq,nvslp
 
   namelist/tcinfo/clon_obs,clat_obs
   namelist/param/clon_new,clat_new
@@ -86,7 +115,9 @@ program main
   read(fnm,nml=param)
   close(fnm)
   write(*,'("  observed TC center clon,clat=  ",f5.1,f5.1)') clon_obs,clat_obs
+  write(*,'("  new TC center clon,clat=       ",f5.1,f5.1)') clon_new,clat_new
   write(*,*)
+
 
   !!
   !! 1) read global grid data
@@ -105,6 +136,8 @@ program main
   idate   = headi%idate
   allocate( vcoord(kmax+1,nvcoord) )
   vcoord  = headi%vcoord
+  nvmax   = 1 + 5*kmax + 3*kmax         !ps(slp),T,d,z,u,v,q,o3,cwc
+  dk = kmax - 1
   
   allocate( lon(imax), lat(jmax) )
   allocate( hsg(imax,jmax), psg(imax,jmax) )
@@ -121,10 +154,9 @@ program main
 
 
   !!
-  !! 2) interpolate to the regional subdomain 
+  !! 2) calculate regional subdomain
   !!
-  write(*,*) "[2] INTERPOLATION TO THE REGIONAL SUBDOMAIN"
-
+  write(*,*) "[2] CALCULATE REGIONAL SUBDOMAIN"
   ixc = searchidx(lon,clon_obs,0)    
   do i = 1, irmax
      lonr(i) = lon(ixc) + dxyr*real(-irmax/2 + (i-1))
@@ -133,95 +165,104 @@ program main
   do j = 1, jrmax
      latr(j) = lat(jyc) + dxyr*real(-jrmax/2 + (j-1))
   end do
-
-  nvmax   = 1 + 5*kmax + 3*kmax
-  dk = kmax - 1
-  allocate( hsr(irmax,jrmax), psr(irmax,jrmax) )
-  allocate( tr(irmax,jrmax,kmax), dr(irmax,jrmax,kmax), zr(irmax,jrmax,kmax) )
-  allocate( ur(irmax,jrmax,kmax), vr(irmax,jrmax,kmax) )
-  allocate( qr(irmax,jrmax,kmax), o3r(irmax,jrmax,kmax), cwcr(irmax,jrmax,kmax) )
-
-  call interp2d_quasicubic(imax,jmax,1,lon,lat,hsg,irmax,jrmax,lonr,latr,hsr)
-  call interp2d_quasicubic(imax,jmax,1,lon,lat,psg,irmax,jrmax,lonr,latr,psr)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,tg,irmax,jrmax,lonr,latr,tr)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,dg,irmax,jrmax,lonr,latr,dr)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,zg,irmax,jrmax,lonr,latr,zr)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,ug,irmax,jrmax,lonr,latr,ur)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,vg,irmax,jrmax,lonr,latr,vr)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,qg,irmax,jrmax,lonr,latr,qr)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,o3g,irmax,jrmax,lonr,latr,o3r)
-  call interp2d_quasicubic(imax,jmax,kmax,lon,lat,cwcg,irmax,jrmax,lonr,latr,cwcr)
-
   write(*,'(i4" x ",i0," domain ",f4.1," degrees interval")'),irmax,jrmax,dxyr
   write(*,'("  domain center is     ",f7.2,f7.2)'),lon(ixc),lat(jyc)
   write(*,'("  lonr(1),lonr(irmax)= ",f7.2,f7.2)'),lonr(1),lonr(irmax)
   write(*,'("  latr(1),latr(jrmax)= ",f7.2,f7.2)'),latr(1),latr(jrmax)
   write(*,*) 
-  !for debug
-  !call write_grads(21,'check_psr_total.bin',irmax,jrmax,kmax,1,0,lonr,latr,psr)  
-
+  
 
   !!
-  !! 3) vertical interpolate to the constant pressure level
+  !! 3) vertically interpolate from the model level to the constant pressure level
   !!
-  allocate( datrp(irmax,jrmax,nvmax) )
-  allocate( prm(irmax,jrmax,kmax), psref(irmax,jrmax), prp(irmax,jrmax,kmax) )
   write(*,*) "[3] VERTICAL INTERPOLATION TO THE CONSTANT PRESSURE LEVEL"
 
+  !!
+  !! need two rows & columns outside reigonal subdomain to use quasi-cubic interpolation
+  !!
+  !                                       ! G(ix+1,jy2-1)    -         G(ix2-1,jy2-1)
+  ix1 = searchidx(lon,lonr(1),1) - 1      !       R(1,jrmax) - R(irmax,jrmax)
+  ix2 = searchidx(lon,lonr(irmax),-1) + 1 ! |     |          |                      |
+  jy1 = searchidx(lat,latr(1),1) - 1      !       R(1,1)     - R(irmax,1)
+  jy2 = searchidx(lat,latr(jrmax),-1) + 1 ! G(ix+1,jy1+1)    -         G(ix2-1,jy1+1)
+  irgmax = ix2-ix1+1                         
+  jrgmax = jy2-jy1+1                      
+  ijrgmax = irgmax*jrgmax
+
+  allocate( datrgp(irgmax,jrgmax,nvmax) )
+  allocate( plev(kmax) )
+  allocate( prgm(irgmax,jrgmax,kmax), prgp(irgmax,jrgmax,kmax) )
+
   !! 3.1) calculate input model pressure level
-  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psr,pm=prm)
+  call sigio_modpr(ijrgmax,ijrgmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psg(ix1:ix2,jy1:jy2),pm=prgm)
 
   !! 3.2) calculate constant pressure level for vertical interpolation
-  psref = maxval(psr)    ! referrence pressure
-  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psref,pm=prp)
+  psref = maxval(psg(ix1:ix2,jy1:jy2))    ! referrence pressure
+  call sigio_modpr(1,1,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psref,pm=plev)
+  do k = 1, kmax
+     prgp(:,:,k) = plev(k)
+  end do
 
-  !! 3.3) vertically interpolate data from model levels to constant pressure levels
+  !! 3.3) convert surface pressure to sea level pressure
+  nvslp = 1
+  datrgp(:,:,nvslp) = calcmet_ps2slp(tg(ix1:ix2,jy1:jy2,:),hsg(ix1:ix2,jy1:jy2),psg(ix1:ix2,jy1:jy2),prgm) 
+
+  !! 3.4) vertically interpolate data from model levels to constant pressure levels
   nv  = 2
   nvt = nv
-  call p2p_extrapolate_T(ijrmax,kmax,tr,prm,psr,kmax,prp,psr,hsr,datrp(:,:,nv:nv+dk))
+  call p2p_extrapolate_T(ijrgmax,kmax,tg(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),   &
+       &                 kmax,prgp,psg(ix1:ix2,jy1:jy2),hsg(ix1:ix2,jy1:jy2),datrgp(:,:,nv:nv+dk))
   nv = nv + kmax
-  call p2p(ijrmax,kmax,dr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  call p2p(ijrgmax,kmax,dg(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),kmax,prgp,datrgp(:,:,nv:nv+dk))
   nv = nv + kmax
-  call p2p(ijrmax,kmax,zr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  call p2p(ijrgmax,kmax,zg(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),kmax,prgp,datrgp(:,:,nv:nv+dk))
   nv = nv + kmax
   nvu = nv
-  call p2p(ijrmax,kmax,ur,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  call p2p(ijrgmax,kmax,ug(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),kmax,prgp,datrgp(:,:,nv:nv+dk))
   nv = nv + kmax
   nvv = nv
-  call p2p(ijrmax,kmax,vr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  call p2p(ijrgmax,kmax,vg(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),kmax,prgp,datrgp(:,:,nv:nv+dk))
   nv = nv + kmax
-  nvq = nv
-  qr = calcmet_rh(tr,qr,prm)   !SPH->RH        
-  call p2p(ijrmax,kmax,qr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
-  datrp(:,:,nv:nv+dk) = max(min(datrp(:,:,nv:nv+dk),100.),0.)
-  datrp(:,:,nv:nv+dk) = calcmet_q(datrp(:,:,nvt:nvt+dk),datrp(:,:,nv:nv+dk),prp)    !RH->SPH
+  nvq = nv  
+  call p2p_q2rh(ijrgmax,kmax,qg(ix1:ix2,jy1:jy2,:),tg(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),  &
+       &        kmax,prgp,psg(ix1:ix2,jy1:jy2),hsg(ix1:ix2,jy1:jy2),datrgp(:,:,nv:nv+dk))  
   nv = nv + kmax
-  call p2p(ijrmax,kmax,o3r,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))
+  call p2p(ijrgmax,kmax,o3g(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),kmax,prgp,datrgp(:,:,nv:nv+dk))
   nv = nv + kmax
-  call p2p(ijrmax,kmax,cwcr,prm,psr,kmax,prp,datrp(:,:,nv:nv+dk))  
+  call p2p(ijrgmax,kmax,cwcg(ix1:ix2,jy1:jy2,:),prgm,psg(ix1:ix2,jy1:jy2),kmax,prgp,datrgp(:,:,nv:nv+dk))
 
-  !! 3.4) convert surface pressure to sea level pressure
-  nvslp = 1
-  datrp(:,:,nvslp) = calcmet_slp(datrp(:,:,nvt:nvt+dk),hsr,psr,prp) 
-
-  write(*,'("  refference pressure is ",f9.2)') psref(1,1) 
-  write(*,'("  prm(1,1,1)= ",f9.2,"  prp(1,1,1)= ",f9.2)') prm(1,1,1),prp(1,1,1)
+  write(*,'("  refference pressure is ",f9.2)') psref(1) 
+  write(*,'("  prgm(1,1,1)=       ",f9.2,"  prgp(1,1,1)=     ",f9.2)') prgm(1,1,1),prgp(1,1,1)
+  write(*,'("  datrgp(1,1,nvslp)= ",f9.2,"  datrgp(1,1,nvt)= ",f9.2)') datrgp(1,1,nvslp),datrgp(1,1,nvt)
+  write(*,'("  datrgp(1,1,nvu)=   ",f9.2,"  datrgp(1,1,nvv)= ",f9.2)') datrgp(1,1,nvu),datrgp(1,1,nvv)
+  write(*,'("  datrgp(1,1,nvq)=   ",f9.2)') datrgp(1,1,nvq)
   write(*,*)
 
 
   !!
-  !! 4) separate vortex field
+  !! 4) horizontal interpolation
   !!
-  write(*,*) "[4] COMPUTE VORTEX FIELD AND ENVIRONMENTAL FIELD"
-  k = searchidx(prp(1,1,:),85000.,0)  
+  write(*,*) "[4] HORIZONTAL INTERPOLATION FROM GAUSSIAN GRID TO REGIONAL GRID"
+  write(*,*) 
+  allocate( datrp(irmax,jrmax,nvmax) )
+  call interp2d_quasicubic(irgmax,jrgmax,nvmax,lon(ix1:ix2),lat(jy1:jy2),datrgp,irmax,jrmax,lonr,latr,datrp)
+
+
+  !!
+  !! 5) separate vortex field
+  !!
+  write(*,*) "[5] COMPUTE VORTEX FIELD AND ENVIRONMENTAL FIELD"
+  k = searchidx(prgp(1,1,:),85000.,0)  
   allocate( lu(irmax,jrmax), lv(irmax,jrmax) )
   allocate( env(irmax,jrmax,nvmax),vrtex(irmax,jrmax,nvmax))
   lu = datrp(:,:,nvu+k-1)
   lv = datrp(:,:,nvv+k-1)
-  write(*,'("  determine filter domain at ",f9.2,"Pa, k=",i0)'),prp(1,1,k),k 
+  write(*,'("  determine filter domain at ",f9.2,"Pa, k=",i0)'),prgp(1,1,k),k 
   write(*,*)
+
   call separate_env_vortex(irmax,jrmax,nvmax,lonr,latr,datrp,lu,lv,clon_obs,clat_obs,env,vrtex,clon,clat)
   write(*,*)
+
   ! for debug
   !call write_grads(21,'check_plev_total.bin',irmax,jrmax,kmax,1,8,lonr,latr,datrp)
   !call write_grads(21,'check_plev_env.bin',irmax,jrmax,kmax,1,8,lonr,latr,env)
@@ -229,9 +270,9 @@ program main
 
 
   !!
-  !! 5) vortex relocation
+  !! 6) vortex relocation
   !!
-  write(*,*) "[5] VORTEX RELOCATION"
+  write(*,*) "[6] VORTEX RELOCATION"
   if (clon_new==-9999) clon_new = clon_obs
   if (clat_new==-9999) clat_new = clat_obs
   
@@ -249,64 +290,64 @@ program main
 
 
   !!
-  !! 6) vertical interpolation to model level
+  !! 7) horizontal interpolation to gaussain grid
   !!
-  write(*,*) "[6] VERTICAL INTERPOLATION TO THE MODEL LEVEL"  
+  write(*,*) "[7] HORIZONTAL INTERPOLATION FROM REGIONAL GRID TO GAUSSIAN GRID"
   write(*,*)
-  
-  !! 6.1) calculate surface pressure
-  psr = calcmet_ps_fromslp(datrp(:,:,nvt:nvt+dk),hsr,datrp(:,:,nvslp),prp)
+  !!
+  !! need two rows & columns to use quasi-cubic interpolation
+  !!
+  !                                       ! R(2,jrmax-1)     -        R(irmax-1,jrmax-1)
+  ix1 = searchidx(lon,lonr(2),-1)         !       G(ix1,jy2) - G(ix2,jy2)
+  ix2 = searchidx(lon,lonr(irmax-1),1)    ! |          |     |              |
+  jy1 = searchidx(lat,latr(2),-1)         !       G(ix1,jy1) - G(ix2,jy1)
+  jy2 = searchidx(lat,latr(jrmax-1),1)    ! R(2,2)           -        R(irmax-1,2)
+  irgmax = ix2-ix1+1                      !   
+  jrgmax = jy2-jy1+1                      !
+  ijrgmax = irgmax*jrgmax
 
-  !! 6.2) calculate model pressure level corespoding to the relocated field
-  call sigio_modpr(ijrmax,ijrmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psr,pm=prm)
+  deallocate( datrgp )
+  allocate( datrgp(irgmax,jrgmax,nvmax) )
+  call interp2d_quasicubic(irmax,jrmax,nvmax,lonr,latr,datrp,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),datrgp) 
 
-  !! 6.2) vertical interpolation
+
+  !!
+  !! 8) vertical interpolation to model level
+  !!
+  write(*,*) "[8] VERTICAL INTERPOLATION TO THE MODEL LEVEL"  
+  write(*,*)
+  deallocate( prgm, prgp )
+  allocate( prgm(irgmax,jrgmax,kmax), prgp(irgmax,jrgmax,kmax ) )
+
+  !! 8.1) calculate surface pressure
+  do k = 1, kmax
+     prgp(:,:,k) = plev(k)
+  end do
+  psg(ix1:ix2,jy1:jy2) = calcmet_slp2ps(datrgp(:,:,nvt:nvt+dk),hsg(ix1:ix2,jy1:jy2),datrgp(:,:,nvslp),prgp)
+  !! 8.2) calculate model pressure level corespoding to the relocated field
+  call sigio_modpr(ijrgmax,ijrgmax,kmax,nvcoord,idvc,idsl,vcoord,ierr,ps=psg(ix1:ix2,jy1:jy2),pm=prgm)
+
+  !! 8.3) vertical interpolation
   nv = nvt
-  call p2p_extrapolate_T(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,psr,hsr,tr)
+  call p2p_extrapolate_T(ijrgmax,kmax,datrgp(:,:,nv:nv+dk),prgp,psg(ix1:ix2,jy1:jy2),  &
+       &                 kmax,prgm,psg(ix1:ix2,jy1:jy2),hsg(ix1:ix2,jy1:jy2),tg(ix1:ix2,jy1:jy2,:))
   nv = nv + kmax
-  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,dr)        
+  call p2p(ijrgmax,kmax,datrgp(:,:,nv:nv+dk),prgp,psg(ix1:ix2,jy1:jy2),kmax,prgm,dg(ix1:ix2,jy1:jy2,:)) 
   nv = nv + kmax
-  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,zr)        
+  call p2p(ijrgmax,kmax,datrgp(:,:,nv:nv+dk),prgp,psg(ix1:ix2,jy1:jy2),kmax,prgm,zg(ix1:ix2,jy1:jy2,:))
   nv = nvq
-  datrp(:,:,nv:nv+dk) = calcmet_rh(datrp(:,:,nvt:nvt+dk),datrp(:,:,nv:nv+dk),prp)   !SPH->RH        
-  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,qr)        
-  qr = max(min(qr,100.),0.)
-  qr = calcmet_q(tr,qr,prm)    !RH->SPH
+  call p2p_q2rh(ijrgmax,kmax,datrgp(:,:,nv:nv+dk),datrgp(:,:,nvt:nvt+dk),prgp,psg(ix1:ix2,jy1:jy2), &
+       &        kmax,prgm,psg(ix1:ix2,jy1:jy2),hsg(ix1:ix2,jy1:jy2),qg(ix1:ix2,jy1:jy2,:)) 
   nv = nv + kmax
-  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,o3r)        
+  call p2p(ijrgmax,kmax,datrgp(:,:,nv:nv+dk),prgp,psg(ix1:ix2,jy1:jy2),kmax,prgm,o3g(ix1:ix2,jy1:jy2,:)) 
   nv = nv + kmax
-  call p2p(ijrmax,kmax,datrp(:,:,nv:nv+dk),prp,psr,kmax,prm,cwcr)        
-  !for debug
-  !call write_grads(21,'check_psr_relocated.bin',irmax,jrmax,kmax,1,0,lonr,latr,psr)  
+  call p2p(ijrgmax,kmax,datrgp(:,:,nv:nv+dk),prgp,psg(ix1:ix2,jy1:jy2),kmax,prgm,cwcg(ix1:ix2,jy1:jy2,:)) 
 
 
   !!
-  !! 7) interpolation to global grid
+  !! 9) write output gfs sigma file
   !!
-  write(*,*) "[7] INTERPOLATION TO GLOBAL GRID"
-  !                                      ! R(2,jrmax-1)      -            R(irmax-1,jrmax-1)
-  ix1 = searchidx(lon,lonr(2),-1)        !        G(ix1,jy2) - G(ix2,iy2)
-  ix2 = searchidx(lon,lonr(irmax-1),1)   !    |        |           |         |
-  jy1 = searchidx(lat,latr(2),-1)        !        G(ix1,jy1) - G(ix2,jy1)
-  jy2 = searchidx(lat,latr(jrmax-1),1)   ! R(2,2)            -            R(irmax-1,2)
-  irgmax = ix2-ix1+1                     !   
-  jrgmax = jy2-jy1+1                     !
-
-  write(*,'("  lon(ix1),lon(ix2),lat(jy1),lat(jy2)= ",f7.2,f7.2,f6.2,f6.2)'),lon(ix1),lon(ix2),lat(jy1),lat(jy2)
-  write(*,*) 
-  call interp2d_quasicubic(irmax,jrmax,1,lonr,latr,psr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),psg(ix1:ix2,jy1:jy2))  
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,tr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),tg(ix1:ix2,jy1:jy2,:))
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,dr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),dg(ix1:ix2,jy1:jy2,:))
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,zr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),zg(ix1:ix2,jy1:jy2,:))
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,qr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),qg(ix1:ix2,jy1:jy2,:))
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,o3r,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),o3g(ix1:ix2,jy1:jy2,:))
-  call interp2d_quasicubic(irmax,jrmax,kmax,lonr,latr,cwcr,irgmax,jrgmax,lon(ix1:ix2),lat(jy1:jy2),cwcg(ix1:ix2,jy1:jy2,:))
-
-
-  !!
-  !! 8) write output gfs sigma file
-  !!
-  write(*,*) "WRITE OUTPUT GFS SIGMA FILE"
+  write(*,*) "[9] WRITE OUTPUT GFS SIGMA FILE"
   call gfs_grid2sigma(imax,jmax,kmax,maxwv,4,headi,datao,hsg,psg,tg,dg,zg,qg,o3g,cwcg,yrev=.false.)
   call gfs_sigmawrite(fno,'output.sigma',headi,datao)
 
