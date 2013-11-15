@@ -25,7 +25,7 @@ module vortex_module
   implicit none
 
   private
-  public :: separate_env_vortex
+  public :: separate_env_vortex, slp_center
 
   !! PARMETER FOR VORTEX SEPARATION
   !
@@ -39,8 +39,8 @@ module vortex_module
   ! 7x7 grid by 1 degree (KBR95)
   ! 0.2 degree radial intervals and 24 points on te circle 
   ! out to a distance of 6 degree (KBR95)
-  integer(kind=i4b), parameter, private :: idmax=7,jdmax=7,rdmax=30,pdmax=24
-  real(kind=sp)    , parameter, private :: dxyd=1,drd=0.2
+  integer(kind=i4b), parameter, private :: idmax=14,jdmax=14,rdmax=30,pdmax=24
+  real(kind=sp)    , parameter, private :: dxyd=0.5,drd=0.2
 
   ! parameter of optimum interpolation mothod
   ! 2.5 degree (~250km) (KBR95)
@@ -50,7 +50,7 @@ module vortex_module
   logical, private :: debug = .false.
 contains
 
-  subroutine separate_env_vortex(imax,jmax,kmax,xr,yr,datar,lur,lvr,cx,cy,env,vrtex,cx_new,cy_new)
+  subroutine separate_env_vortex(imax,jmax,kmax,xr,yr,datar,lur,lvr,cx,cy,env,vrtex,cx_new,cy_new,r0domain)
     !
     ! DESCRIPTION
     !
@@ -66,9 +66,6 @@ contains
     !    env(imax,jmax,kmax)   : environmental component
     !    vrtex(imax,jmax,kmax) : vortex component
     !
-    ! MODULE
-    !  ip_module - interp2d,searchidx
-    !
     ! MODULE PARAMETER
     !  integer(kind=i4b) :: pmaxr
     !
@@ -78,6 +75,7 @@ contains
     real(kind=sp),     intent(in)  :: cx,cy
     real(kind=sp),     intent(out) :: vrtex(imax,jmax,kmax),env(imax,jmax,kmax)
     real(kind=sp),     intent(out) :: cx_new,cy_new
+    real(kind=sp), intent(out), optional :: r0domain(2,prmax)
 
     integer(kind=i4b) :: i,j,k,icx,jcy
     real(kind=sp)     :: r0(prmax),lurd(imax,jmax),lvrd(imax,jmax)
@@ -110,6 +108,14 @@ contains
     env = datar - vrtex
 
     print*, "  END VORTEX SEPARATION"
+
+    !for debug
+    if (present(r0domain)) then
+       do i = 1, prmax
+          r0domain(1,i) = cx_new + r0(i)*cos(2.*PI/real(prmax)*(i-1))
+          r0domain(2,i) = cy_new + r0(i)*sin(2.*PI/real(prmax)*(i-1))
+       end do       
+    end if
 
   end subroutine separate_env_vortex
 
@@ -306,7 +312,7 @@ contains
        e1 = sin(phi(j))
        e2 = cos(phi(j))
        do i = 1, rrmax          
-          twd(i,j) = -uc(i,j)*e1 + vc(i,j)*e2
+          twd(i,j) = -uc(i,j)*e1 + vc(i,j)*e2          
        end do
     end do
     twd_ave = 0.
@@ -424,6 +430,17 @@ contains
        end do
        write(21,*) cx+r0(1)*cos(phi(1)),cy+r0(1)*sin(phi(1))
        close(21)
+
+       open(22,file='check_twdprofile.txt')
+       do j = 1, prmax
+          write(22,*) (twd(i,j), i=1, rrmax)
+       end do
+       close(22)
+       open(23,file='check_r0.txt')
+       do i = 1, prmax
+          write(23,*) r0(i)
+       end do
+       close(23)
     end if
   end subroutine filter_domain
 
@@ -557,5 +574,73 @@ contains
  
   end subroutine remove_vortex
   
+  subroutine slp_center(imax,jmax,x,y,slp,cxg,cyg,cx,cy,cslp,dsize)
+    !
+    ! DESCRIPTION
+    !  Estimate a sub-grid minimum slp from a gridded data
+    !
+    ! ARGUMENTS
+    !  INPUT:
+    !    x(imax),y(jmax) : longitude & latitude of input field
+    !    slp(imax,jmax)  : sea level pressure
+    !    cxg,cyo         : first-guess TC center position
+    !    dsize           : domain box size (dxy x dxy center) (defualt=7)
+    !  OUTPUT:
+    !    cx,cy           : TC center position
+    !    cslp            : central pressure
+    !
+    ! REFFERENCE
+    !  van der Grijin (2002): Tropical cyclone forecastin at ECMWF: New products and validation.  
+    !    ECMWF Tech. Memo., 386, 
+    !
+    integer(kind=i4b), intent(in)  :: imax,jmax
+    real(kind=sp),     intent(in)  :: cxg,cyg
+    real(kind=sp),     intent(in)  :: x(imax),y(jmax),slp(imax,jmax)
+    real(kind=sp),     intent(out) :: cx,cy,cslp
+    real(kind=sp),intent(in),optional :: dsize
+    integer(kind=i4b) :: i,j,six,eix,sjy,ejy,ix,jy
+    real(kind=sp)     :: dd,mslp,dx,dy,sx,sy,deltax,deltay
+
+    if (present(dsize)) then
+       dd = 0.5*dsize
+    else
+       dd = 3.5
+    end if
+
+    ix  = searchidx(x,cxg,0)
+    jy  = searchidx(y,cyg,0)
+    six = searchidx(x,cxg-dd,1)
+    eix = searchidx(x,cxg+dd,-1)
+    sjy = searchidx(y,cyg-dd,1)
+    ejy = searchidx(y,cyg+dd,-1)    
+
+    if ( six<0 .or. eix>imax .or. sjy<0 .or. ejy>jmax ) then
+       print*, "minimum SLP grid point is out of grid to calculate subgrid minimum point"
+       call abort
+    end if
+
+    mslp = 1.e7
+    do j = sjy, ejy
+       do i = six, eix
+          if (slp(i,j) < mslp) then
+             ix = i
+             jy = j
+             mslp = slp(i,j)
+          end if
+       end do
+    end do
+
+    dx = slp(ix+1,jy) - slp(ix-1,jy)
+    dy = slp(ix,jy+1) - slp(ix,jy-1)
+    sx = slp(ix+1,jy) + slp(ix-1,jy) - 2.*slp(ix,jy)
+    sy = slp(ix,jy+1) + slp(ix,jy-1) - 2.*slp(ix,jy)
+    deltax = x(ix+1) - x(ix)
+    deltay = y(jy+1) - y(jy)
+
+    cx = x(ix) - 0.5*deltax/sx
+    cy = y(jy) - 0.5*deltay/sy
+    cslp = slp(ix,jy) - 0.125*(dx**2/sx-dy**2/sy) 
+
+  end subroutine slp_center
 
 end module vortex_module
