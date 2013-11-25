@@ -242,7 +242,7 @@ contains
     call p2p_extrapolate_T(imax,kmaxi,tempi,pi,psi,kmaxo,po,pso,hs,tempo)
     qo = max(min(qo,100.),0.)
 
-    do k = 1, kmaxi
+    do k = 1, kmaxo
        do i = 1, imax
           qo(i,k) = calcmet_rh2q(tempo(i,k),qo(i,k),po(i,k))
        end do
