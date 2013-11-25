@@ -230,7 +230,7 @@ contains
     real(kind=sp),     intent(out) :: qo(imax,kmaxo)
 
     integer(kind=i4b) :: i, k
-    real(kind=sp)     :: rhi(imax,kmaxi), tempo(imax,kmaxi)
+    real(kind=sp)     :: rhi(imax,kmaxi), tempo(imax,kmaxo)
 
     do k = 1, kmaxi
        do i = 1, imax
